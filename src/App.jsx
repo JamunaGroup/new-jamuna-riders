@@ -252,9 +252,9 @@ function LoginScreen({ onSignedIn }) {
   );
 }
 
-function Card({ children, style }) {
+function Card({ children, style, onClick }) {
   return (
-    <div style={{ background: "#fff", border: "1px solid #e4e1d8", borderRadius: 12, padding: "16px 18px", ...style }}>
+    <div onClick={onClick} style={{ background: "#fff", border: "1px solid #e4e1d8", borderRadius: 12, padding: "16px 18px", ...style }}>
       {children}
     </div>
   );
