@@ -136,7 +136,7 @@ export default function RiderApp() {
             <div style={{ fontSize: 13, color: "#c9c6bb", marginTop: 4 }}>Signed in as {session.user?.email}</div>
           </div>
           <button
-            onClick={() => setSession(null)}
+            onClick={() => { setSession(null); window.location.reload(); }}
             style={{ background: "transparent", border: "1px solid rgba(244,241,234,0.4)", color: "#f4f1ea", borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}
           >
             Log out
@@ -147,6 +147,7 @@ export default function RiderApp() {
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e4e1d8" }}>
         {[
           ["riders", "Riders"],
+          ["details", "Rider Details"],
           ["entry", "Daily entry"],
           ["salary", "Salary & export"],
         ].map(([key, label]) => (
@@ -173,6 +174,8 @@ export default function RiderApp() {
         <div style={{ padding: 40, textAlign: "center", color: "#8a8880" }}>Loading…</div>
       ) : tab === "riders" ? (
         <RidersTab session={session} riders={riders} setRiders={setRiders} showToast={showToast} />
+      ) : tab === "details" ? (
+        <RiderDetailsTab riders={riders} deliveries={deliveries} deductions={deductions} />
       ) : tab === "entry" ? (
         <EntryTab session={session} riders={riders} deliveries={deliveries} setDeliveries={setDeliveries} showToast={showToast} />
       ) : (
@@ -297,7 +300,44 @@ function RidersTab({ session, riders, setRiders, showToast }) {
   const [form, setForm] = useState({ riderId: "", name: "", qid: "", phone: "", client: CLIENTS[0], rate: "", kmRate: "" });
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
   const client = sb(session);
+
+  function startEdit(r) {
+    setEditingId(r.id);
+    setEditForm({ riderId: r.riderId, name: r.name, qid: r.qid, phone: r.phone, client: r.client, rate: r.rate, kmRate: r.kmRate });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm(null);
+  }
+
+  async function saveEdit(id) {
+    if (!editForm.name.trim() || !editForm.rate || Number(editForm.rate) <= 0) {
+      showToast("Enter a name and a rate above 0.");
+      return;
+    }
+    const patch = {
+      rider_id: editForm.riderId.trim(),
+      name: editForm.name.trim(),
+      qid: editForm.qid.trim(),
+      phone: editForm.phone,
+      client: editForm.client,
+      rate: Number(editForm.rate),
+      km_rate: Number(editForm.kmRate) || 0,
+    };
+    try {
+      await client.update("riders", id, patch);
+      setRiders((prev) => prev.map((r) => (r.id === id ? { ...r, riderId: patch.rider_id, name: patch.name, qid: patch.qid, phone: patch.phone, client: patch.client, rate: patch.rate, kmRate: patch.km_rate } : r)));
+      setEditingId(null);
+      setEditForm(null);
+      showToast("Rider details updated");
+    } catch (e) {
+      showToast("Failed to update: " + e.message);
+    }
+  }
 
   async function addRider() {
     if (!form.name.trim() || !form.rate || Number(form.rate) <= 0) {
@@ -383,7 +423,27 @@ function RidersTab({ session, riders, setRiders, showToast }) {
         {filtered.length} of {riders.length} riders shown
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {filtered.map((r) => (
+        {filtered.map((r) =>
+          editingId === r.id ? (
+            <Card key={r.id} style={{ padding: "14px 16px" }}>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>Editing {r.name}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1.3fr 1fr", gap: 8, marginBottom: 8 }}>
+                <Input placeholder="Rider ID" value={editForm.riderId} onChange={(e) => setEditForm({ ...editForm, riderId: e.target.value })} />
+                <Input placeholder="Rider name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                <Input placeholder="QID number" value={editForm.qid} onChange={(e) => setEditForm({ ...editForm, qid: e.target.value })} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 0.8fr 0.8fr auto auto", gap: 8 }}>
+                <Input placeholder="Phone" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
+                <select value={editForm.client} onChange={(e) => setEditForm({ ...editForm, client: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #d8d5ca", fontSize: 13 }}>
+                  {CLIENTS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <Input placeholder="Rate/order" type="number" step="0.05" value={editForm.rate} onChange={(e) => setEditForm({ ...editForm, rate: e.target.value })} />
+                <Input placeholder="Rate/extra km" type="number" step="0.05" value={editForm.kmRate} onChange={(e) => setEditForm({ ...editForm, kmRate: e.target.value })} />
+                <Button variant="primary" onClick={() => saveEdit(r.id)}>Save</Button>
+                <Button onClick={cancelEdit}>Cancel</Button>
+              </div>
+            </Card>
+          ) : (
           <Card key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px" }}>
             <div>
               <div style={{ fontWeight: 500, fontSize: 14 }}>
@@ -397,16 +457,95 @@ function RidersTab({ session, riders, setRiders, showToast }) {
               <span style={{ fontSize: 12, padding: "3px 9px", borderRadius: 20, background: r.status === "active" ? "#eaf3de" : "#f1efe8", color: r.status === "active" ? "#3b6d11" : "#6b6a63" }}>
                 {r.status}
               </span>
+              <Button onClick={() => startEdit(r)}>Edit</Button>
               <Button onClick={() => toggleStatus(r.id)}>{r.status === "active" ? "Deactivate" : "Activate"}</Button>
               <Button onClick={() => removeRider(r.id)}>Remove</Button>
             </div>
           </Card>
-        ))}
+          )
+        )}
         {filtered.length === 0 && (
           <div style={{ color: "#8a8880", fontSize: 13, padding: 20, textAlign: "center" }}>
             {riders.length === 0 ? "No riders yet — add your first one above." : "No riders match that search."}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function RiderDetailsTab({ riders, deliveries, deductions }) {
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? riders.filter((r) => [r.name, r.riderId, r.qid, r.phone, r.client].some((v) => (v || "").toLowerCase().includes(q)))
+    : riders;
+
+  const selected = riders.find((r) => r.id === selectedId);
+
+  if (selected) {
+    const allDeliveries = deliveries.filter((d) => d.riderId === selected.id);
+    const totalOrders = allDeliveries.reduce((sum, d) => sum + (Number(d.count) || 0), 0);
+    const totalKm = allDeliveries.reduce((sum, d) => sum + (Number(d.km) || 0), 0);
+    const allDeductions = deductions.filter((x) => x.riderId === selected.id);
+    const totalDed = allDeductions.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    const grossToDate = totalOrders * selected.rate + totalKm * (selected.kmRate || 0);
+
+    return (
+      <div>
+        <Button onClick={() => setSelectedId(null)} style={{ marginBottom: 12 }}>← Back to all riders</Button>
+        <Card>
+          <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 4 }}>{selected.name}</div>
+          <div style={{ fontSize: 13, color: "#6b6a63", marginBottom: 16 }}>
+            <span style={{ padding: "3px 9px", borderRadius: 20, background: selected.status === "active" ? "#eaf3de" : "#f1efe8", color: selected.status === "active" ? "#3b6d11" : "#6b6a63", fontSize: 12, marginRight: 8 }}>
+              {selected.status}
+            </span>
+            {selected.client}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 13, marginBottom: 20 }}>
+            <div><b>Rider ID:</b> {selected.riderId || "-"}</div>
+            <div><b>QID Number:</b> {selected.qid || "-"}</div>
+            <div><b>Phone:</b> {selected.phone || "-"}</div>
+            <div><b>Client:</b> {selected.client}</div>
+            <div><b>Rate per order:</b> QR {fmt(selected.rate)}</div>
+            <div><b>Rate per extra km:</b> QR {fmt(selected.kmRate || 0)}</div>
+          </div>
+
+          <div style={{ borderTop: "1px solid #eeece4", paddingTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>All-time summary</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 13 }}>
+              <div><b>Total orders logged:</b> {totalOrders}</div>
+              <div><b>Total extra km logged:</b> {totalKm}</div>
+              <div><b>Total gross earned:</b> QR {fmt(grossToDate)}</div>
+              <div><b>Total deductions:</b> QR {fmt(totalDed)}</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 16 }}>
+        <Input placeholder="Search by name, rider ID, QID, phone, or client…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </Card>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {filtered.map((r) => (
+          <Card key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", cursor: "pointer" }} onClick={() => setSelectedId(r.id)}>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>
+                {r.name} {r.riderId && <span style={{ color: "#8a8880", fontWeight: 400 }}>· ID {r.riderId}</span>}
+              </div>
+              <div style={{ fontSize: 12, color: "#6b6a63" }}>{r.client} · {r.phone || "no phone"}</div>
+            </div>
+            <span style={{ fontSize: 12, color: "#8a8880" }}>View details →</span>
+          </Card>
+        ))}
+        {filtered.length === 0 && <div style={{ color: "#8a8880", fontSize: 13, padding: 20, textAlign: "center" }}>No riders match that search.</div>}
       </div>
     </div>
   );
