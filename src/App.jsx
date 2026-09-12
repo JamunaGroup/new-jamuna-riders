@@ -561,35 +561,56 @@ function EntryTab({ session, riders, deliveries, setDeliveries, showToast }) {
     ? activeAll.filter((r) => [r.name, r.riderId, r.qid, r.phone, r.client].some((v) => (v || "").toLowerCase().includes(q)))
     : activeAll;
 
-  function getRow(riderId) {
-    return deliveries.find((d) => d.riderId === riderId && d.date === date);
+  const [drafts, setDrafts] = useState({});
+  const [locked, setLocked] = useState({});
+
+  useEffect(() => {
+    const newDrafts = {};
+    const newLocked = {};
+    riders.forEach((r) => {
+      const row = deliveries.find((d) => d.riderId === r.id && d.date === date);
+      newDrafts[r.id] = { count: row && row.count !== "" ? row.count : "", km: row && row.km !== "" ? row.km : "" };
+      newLocked[r.id] = !!row;
+    });
+    setDrafts(newDrafts);
+    setLocked(newLocked);
+  }, [date, deliveries, riders]);
+
+  function updateDraft(riderId, field, value) {
+    const num = value === "" ? "" : Math.max(0, Number(value));
+    setDrafts((prev) => ({ ...prev, [riderId]: { ...prev[riderId], [field]: num } }));
   }
 
-  async function setField(riderId, field, value) {
-    const num = value === "" ? "" : Math.max(0, Number(value));
+  async function saveRow(riderId) {
+    const draft = drafts[riderId] || { count: "", km: "" };
     const existing = deliveries.find((d) => d.riderId === riderId && d.date === date);
     try {
       if (existing) {
-        await client.update("deliveries", existing.id, { [field]: num === "" ? null : num });
-        setDeliveries((prev) => prev.map((d) => (d.id === existing.id ? { ...d, [field]: num } : d)));
-      } else {
-        const row = { id: uid(), riderId, date, count: field === "count" ? num : "", km: field === "km" ? num : "" };
-        await client.insert("deliveries", {
-          id: row.id,
-          rider_id: row.riderId,
-          date: row.date,
-          count: row.count === "" ? null : row.count,
-          km: row.km === "" ? null : row.km,
+        await client.update("deliveries", existing.id, {
+          count: draft.count === "" ? null : draft.count,
+          km: draft.km === "" ? null : draft.km,
         });
-        setDeliveries((prev) => [...prev, row]);
+        setDeliveries((prev) => prev.map((d) => (d.id === existing.id ? { ...d, count: draft.count, km: draft.km } : d)));
+      } else {
+        const newId = uid();
+        await client.insert("deliveries", {
+          id: newId,
+          rider_id: riderId,
+          date,
+          count: draft.count === "" ? null : draft.count,
+          km: draft.km === "" ? null : draft.km,
+        });
+        setDeliveries((prev) => [...prev, { id: newId, riderId, date, count: draft.count, km: draft.km }]);
       }
+      setLocked((prev) => ({ ...prev, [riderId]: true }));
+      showToast("Entry saved");
     } catch (e) {
       showToast("Failed to save entry: " + e.message);
     }
   }
 
-  function saveDay() {
-    showToast(`Entries for ${date} are saved`);
+  function unlockRow(riderId) {
+    setLocked((prev) => ({ ...prev, [riderId]: false }));
   }
 
   return (
@@ -597,9 +618,6 @@ function EntryTab({ session, riders, deliveries, setDeliveries, showToast }) {
       <Card style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ fontSize: 13, color: "#6b6a63" }}>Entry date</div>
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: 180 }} />
-        <div style={{ marginLeft: "auto" }}>
-          <Button variant="primary" onClick={saveDay}>Save entries</Button>
-        </div>
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
@@ -615,33 +633,44 @@ function EntryTab({ session, riders, deliveries, setDeliveries, showToast }) {
             <Card style={{ padding: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 16px", borderBottom: "1px solid #eeece4", fontSize: 11, color: "#8a8880", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 <div>Rider</div>
-                <div style={{ display: "flex", gap: 18 }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                   <div style={{ width: 90, textAlign: "right" }}>Orders</div>
                   <div style={{ width: 90, textAlign: "right" }}>Extra km</div>
+                  <div style={{ width: 70 }}></div>
                 </div>
               </div>
               {clientRiders.map((r, i) => {
-                const row = getRow(r.id);
+                const draft = drafts[r.id] || { count: "", km: "" };
+                const isLocked = !!locked[r.id];
                 return (
                   <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: i === 0 ? "none" : "1px solid #eeece4" }}>
                     <div style={{ fontSize: 14 }}>{r.name}</div>
-                    <div style={{ display: "flex", gap: 18 }}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       <Input
                         type="number"
                         min="0"
                         placeholder="0"
-                        value={row ? row.count : ""}
-                        onChange={(e) => setField(r.id, "count", e.target.value)}
-                        style={{ width: 90, textAlign: "right" }}
+                        value={draft.count}
+                        disabled={isLocked}
+                        onChange={(e) => updateDraft(r.id, "count", e.target.value)}
+                        style={{ width: 90, textAlign: "right", background: isLocked ? "#f4f2ec" : "#fff", color: isLocked ? "#6b6a63" : "#1c1c1a" }}
                       />
                       <Input
                         type="number"
                         min="0"
                         placeholder="0"
-                        value={row ? row.km : ""}
-                        onChange={(e) => setField(r.id, "km", e.target.value)}
-                        style={{ width: 90, textAlign: "right" }}
+                        value={draft.km}
+                        disabled={isLocked}
+                        onChange={(e) => updateDraft(r.id, "km", e.target.value)}
+                        style={{ width: 90, textAlign: "right", background: isLocked ? "#f4f2ec" : "#fff", color: isLocked ? "#6b6a63" : "#1c1c1a" }}
                       />
+                      <div style={{ width: 70 }}>
+                        {isLocked ? (
+                          <Button onClick={() => unlockRow(r.id)}>Edit</Button>
+                        ) : (
+                          <Button variant="primary" onClick={() => saveRow(r.id)}>Save</Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
